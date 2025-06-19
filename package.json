@@ -1,6 +1,6 @@
 {
   "name": "obsidian-dynamic-highlights",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "An Obsidian plugin that dynamically highlights text based on selection or search query",
   "main": "main.js",
   "scripts": {
