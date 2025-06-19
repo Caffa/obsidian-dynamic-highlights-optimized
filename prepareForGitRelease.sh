@@ -29,5 +29,5 @@ git push origin tag $VERSION
 echo "Creating a new release... "
 LASTCOMMIT=$(git log -1 --pretty=%B)
 # Create a new release on GitHub with the zip file and the last commit message
-gh release create $VERSION release.zip dist/main.js manifest.json styles.css --title \"Release $VERSION\" --notes \"$LASTCOMMIT\"
+gh release create $VERSION release.zip --title "Release $VERSION" --notes "$LASTCOMMIT"
 
