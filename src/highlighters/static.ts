@@ -10,6 +10,49 @@ import { SearchQueries } from "src/settings/settings";
 import { StyleSpec } from "style-mod";
 import { RegExpCursor } from "./regexp-cursor";
 
+// Object pooling for performance optimization
+class DecorationPool {
+  private decorationCache = new Map<string, Decoration>();
+
+  getDecoration(type: string, className: string, attributes?: Record<string, string>): Decoration {
+    const key = `${type}-${className}-${JSON.stringify(attributes || {})}`;
+    if (!this.decorationCache.has(key)) {
+      let decoration: Decoration;
+      if (type === 'mark') {
+        decoration = Decoration.mark({ class: className, attributes });
+      } else if (type === 'line') {
+        decoration = Decoration.line({ attributes: { class: className } });
+      } else if (type === 'widget') {
+        decoration = Decoration.widget({ widget: new IconWidget(className) });
+      } else {
+        throw new Error(`Unknown decoration type: ${type}`);
+      }
+      this.decorationCache.set(key, decoration);
+    }
+    return this.decorationCache.get(key)!;
+  }
+
+  createRange(decoration: Decoration, from: number, to: number): Range<Decoration> {
+    // Create a new range object instead of trying to reuse - safer approach
+    return decoration.range(from, to);
+  }
+
+  cleanup(): void {
+    // Periodic cleanup of unused decorations
+    if (this.decorationCache.size > 100) {
+      // Keep only the most recently used decorations
+      const entries = Array.from(this.decorationCache.entries());
+      this.decorationCache.clear();
+      // Keep last 50 decorations
+      entries.slice(-50).forEach(([key, decoration]) => {
+        this.decorationCache.set(key, decoration);
+      });
+    }
+  }
+}
+
+const decorationPool = new DecorationPool();
+
 export type StaticHighlightOptions = {
   queries: SearchQueries;
   queryOrder: string[];
@@ -64,7 +107,9 @@ class IconWidget extends WidgetType {
 
   toDOM() {
     let headerEl = document.createElement("span");
-    this.className && headerEl.addClass(this.className);
+    if (this.className) {
+      headerEl.className = this.className; // Fixed: Use className property instead of addClass
+    }
     return headerEl;
   }
 
@@ -79,13 +124,25 @@ const staticHighlighter = ViewPlugin.fromClass(
     lineDecorations: DecorationSet;
     groupDecorations: DecorationSet;
     widgetDecorations: DecorationSet;
-
-    constructor(view: EditorView) {
+    cleanupInterval: number | null = null;    constructor(view: EditorView) {
       let { token, line, group, widget } = this.getDeco(view);
       this.decorations = token;
       this.lineDecorations = line;
       this.groupDecorations = group;
       this.widgetDecorations = widget;
+
+      // Schedule periodic cleanup with proper cleanup
+      this.cleanupInterval = setInterval(() => {
+        decorationPool.cleanup();
+      }, 30000);
+    }
+
+    // Add cleanup method to properly dispose of the interval
+    destroy() {
+      if (this.cleanupInterval) {
+        clearInterval(this.cleanupInterval);
+        this.cleanupInterval = null;
+      }
     }
 
     update(update: ViewUpdate) {
@@ -137,14 +194,14 @@ const staticHighlighter = ViewPlugin.fromClass(
               lineClasses[linePos].push(query.class);
             }
             if (!query.mark || query.mark?.contains("match")) {
-              const markDeco = Decoration.mark({ class: query.class, attributes: { "data-contents": string } });
-              tokenDecos.push(markDeco.range(from, to));
+              const markDeco = decorationPool.getDecoration('mark', query.class, { "data-contents": string });
+              tokenDecos.push(decorationPool.createRange(markDeco, from, to));
             }
             if (query.mark?.contains("start") || query.mark?.contains("end")) {
-              let startDeco = Decoration.widget({ widget: new IconWidget(query.class + "-start") });
-              let endDeco = Decoration.widget({ widget: new IconWidget(query.class + "-end") });
-              if (query.mark?.contains("start")) widgetDecos.push(startDeco.range(from, from));
-              if (query.mark?.contains("end")) widgetDecos.push(endDeco.range(to, to));
+              let startDeco = decorationPool.getDecoration('widget', query.class + "-start");
+              let endDeco = decorationPool.getDecoration('widget', query.class + "-end");
+              if (query.mark?.contains("start")) widgetDecos.push(decorationPool.createRange(startDeco, from, from));
+              if (query.mark?.contains("end")) widgetDecos.push(decorationPool.createRange(endDeco, to, to));
             }
             if (query.mark?.contains("group")) {
               let groups;
@@ -156,8 +213,8 @@ const staticHighlighter = ViewPlugin.fromClass(
                 Object.entries(groups).forEach(group => {
                   try {
                     let [groupName, [groupFrom, groupTo]] = group;
-                    const groupDeco = Decoration.mark({ class: groupName });
-                    groupDecos.push(groupDeco.range(linePos + groupFrom, linePos + groupTo));
+                    const groupDeco = decorationPool.getDecoration('mark', groupName);
+                    groupDecos.push(decorationPool.createRange(groupDeco, linePos + groupFrom, linePos + groupTo));
                   } catch (err) {
                     console.debug(err);
                   }
@@ -171,9 +228,10 @@ const staticHighlighter = ViewPlugin.fromClass(
         // the issue was fixed in obs 0.13.20 but we'll leave it like this until the
         // next public release
         pos = parseInt(pos); // since Object.entries returns keys as strings
-        const lineDeco = Decoration.line({ attributes: { class: classes.join(" ") } });
-        lineDecos.push(lineDeco.range(pos));
+        const lineDeco = decorationPool.getDecoration('line', classes.join(" "));
+        lineDecos.push(decorationPool.createRange(lineDeco, pos, pos));
       });
+      decorationPool.cleanup();
       return {
         line: Decoration.set(lineDecos.sort((a, b) => a.from - b.from)),
         token: Decoration.set(tokenDecos.sort((a, b) => a.from - b.from)),
@@ -193,3 +251,4 @@ const staticHighlighter = ViewPlugin.fromClass(
     ],
   }
 );
+

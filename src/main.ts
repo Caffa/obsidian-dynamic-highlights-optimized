@@ -21,7 +21,6 @@ export default class DynamicHighlightsPlugin extends Plugin {
   customCSS: Record<string, CustomCSS>;
   styleEl: HTMLElement;
   settingsTab: SettingTab;
-
   async onload() {
     await this.loadSettings();
     this.settingsTab = new SettingTab(this.app, this);
@@ -34,13 +33,27 @@ export default class DynamicHighlightsPlugin extends Plugin {
     this.updateStyles();
     this.registerEditorExtension(this.extensions);
     this.initCSS();
+
+    // Schedule periodic cleanup for performance
+    this.registerInterval(window.setInterval(() => {
+      this.performPeriodicCleanup();
+    }, 60000)); // Every minute
   }
 
+  performPeriodicCleanup() {
+    // Force garbage collection of unused decorations
+    this.app.workspace.trigger('decoration-cleanup');
+
+    // Cleanup custom CSS if it gets too large
+    if (this.styleEl && this.styleEl.textContent && this.styleEl.textContent.length > 100000) {
+      this.updateCustomCSS();
+    }
+  }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     if (this.settings.selectionHighlighter.highlightDelay < 200) {
       this.settings.selectionHighlighter.highlightDelay = 200;
-      this.saveSettings;
+      this.saveSettings(); // Fixed: Added missing parentheses
     }
   }
 
@@ -110,3 +123,4 @@ export default class DynamicHighlightsPlugin extends Plugin {
     true
   );
 }
+

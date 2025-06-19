@@ -69,19 +69,53 @@ const matchHighlighter = ViewPlugin.fromClass(
 
     update(update: ViewUpdate) {
       if (update.selectionSet || update.docChanged || update.viewportChanged) {
+        // Determine update type for adaptive debouncing
+        const isTyping = update.docChanged && update.transactions.some(tr => tr.isUserEvent('input.type'));
+        const isScrolling = update.viewportChanged && !update.docChanged && !update.selectionSet;
+
+        // Use shorter delays for scrolling, longer for typing
+        let effectiveDelay = this.highlightDelay;
+        if (isScrolling) effectiveDelay = Math.min(this.highlightDelay, 100);
+        if (isTyping) effectiveDelay = Math.max(this.highlightDelay, 200);
+
         // don't immediately remove decorations to prevent issues with things like link clicking
         // https://github.com/nothingislost/obsidian-dynamic-highlights/issues/58
         setTimeout(() => {
           this.decorations = Decoration.none;
           update.view.update([]);
         }, 150);
-        // this.decorations = Decoration.none;
-        this.delayedGetDeco(update.view);
+
+        // Create a temporary debouncer with the effective delay if different
+        if (effectiveDelay !== this.highlightDelay) {
+          const tempDebouncer = debounce(
+            (view: EditorView) => {
+              this.decorations = this.getDeco(view);
+              view.update([]);
+            },
+            effectiveDelay,
+            true
+          );
+          tempDebouncer(update.view);
+        } else {
+          this.delayedGetDeco(update.view);
+        }
       }
     }
 
     updateDebouncer(view: EditorView) {
-      this.highlightDelay = view.state.facet(highlightConfig).highlightDelay;
+      const baseDelay = view.state.facet(highlightConfig).highlightDelay;
+
+      // Adaptive debouncing based on document size and complexity
+      const docSize = view.state.doc.length;
+      const visibleRangeSize = view.visibleRanges.reduce((sum, range) => sum + (range.to - range.from), 0);
+
+      // Scale delay based on document characteristics
+      let adaptiveDelay = baseDelay;
+      if (docSize > 50000) adaptiveDelay = Math.max(baseDelay, 300); // Large docs need more time
+      if (docSize > 100000) adaptiveDelay = Math.max(baseDelay, 500); // Very large docs
+      if (visibleRangeSize > 10000) adaptiveDelay += 100; // Large visible area
+
+      this.highlightDelay = adaptiveDelay;
       this.delayedGetDeco = debounce(
         (view: EditorView) => {
           this.decorations = this.getDeco(view);
@@ -158,3 +192,4 @@ const matchHighlighter = ViewPlugin.fromClass(
     decorations: v => v.decorations,
   }
 );
+
