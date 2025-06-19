@@ -7,7 +7,7 @@ mkdir -p dynamic-highlights-optimized
 # make a copy of the main.js, manifest.json, and styles.css files in another folder
 cp dist/main.js dynamic-highlights-optimized
 cp manifest.json dynamic-highlights-optimized
-
+cp styles.css dynamic-highlights-optimized
 # compress the current_release folder into a zip file
 # zip -r release.zip current_release
 zip -vr dynamic-highlights-optimized.zip dynamic-highlights-optimized -x "*.DS_Store"
@@ -24,7 +24,10 @@ git commit -m "Prepare for Git Release. Bump version to $VERSION"
 git tag $VERSION
 # git push origin main
 echo "Pushing to main tag... "
-echo "git push origin tag $VERSION"
+# echo "git push origin tag $VERSION"
+git push origin tag $VERSION
 echo "Creating a new release... "
-echo "gh release create $VERSION release.zip main.js manifest.json styles.css --title \"Aesthetics\" --notes \"Improve aesthetics\""
+LASTCOMMIT=$(git log -1 --pretty=%B)
+# Create a new release on GitHub with the zip file and the last commit message
+gh release create $VERSION release.zip dist/main.js manifest.json styles.css --title \"Release $VERSION\" --notes \"$LASTCOMMIT\"
 
